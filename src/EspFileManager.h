@@ -25,21 +25,24 @@
 class EspFileManager
 {
 private:
-    uint8_t sd_cs, sd_sck, sd_miso, sd_mosi;
-    bool memory_ready = false;
+//    uint8_t sd_cs, sd_sck, sd_miso, sd_mosi;
+//    bool memory_ready = false;
     String str_data = "";
     fs::SDFS *_storage;
     AsyncWebServer *_server;
+
 public:
     EspFileManager(/* args */);
     ~EspFileManager();
 
     // void begin(AsyncWebServer *server, FS *fs);
 
-    bool initSDCard(SDFS *storage, uint8_t _cs);
+//    bool initSDCard(SDFS *storage, uint8_t _cs);
     void setFileSource(SDFS *storage);
     void listDir(const char * dirname, uint8_t levels);
-
+    
     void setServer(AsyncWebServer *server);
+
+    void printStorageInfo();
 };
 

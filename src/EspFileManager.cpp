@@ -5,17 +5,16 @@
 #include <SD.h>
 #include "SPI.h"
 
-
-EspFileManager::EspFileManager(/* args */)
-{
-
-}
-
-EspFileManager::~EspFileManager()
-{
-}
+// load HTML-page from LittleFS for development and debugging
+//#include <LittleFS.h>
 
 
+
+EspFileManager::EspFileManager(/* args */) {}
+
+EspFileManager::~EspFileManager() {}
+
+/*
 bool EspFileManager::initSDCard(fs::SDFS *storage, uint8_t _cs)
 {
     sd_cs = _cs;
@@ -65,6 +64,7 @@ bool EspFileManager::initSDCard(fs::SDFS *storage, uint8_t _cs)
     }
     return false;
 }
+*/
 
 void EspFileManager::setFileSource(fs::SDFS *storage)
 {   
@@ -87,6 +87,16 @@ void EspFileManager::listDir(const char * dirname, uint8_t levels)
 
     bool first_files = true;
     str_data = "";
+
+    // memory info for header
+    uint64_t totalSize = _storage->totalBytes();
+    uint64_t usedSize  = _storage->usedBytes();
+    str_data = "S,";
+    str_data += String((unsigned long)(totalSize / (1024ULL * 1024ULL)));
+    str_data += ",";
+    str_data += String((unsigned long)(usedSize / (1024ULL * 1024ULL)));
+    str_data += ":";   // Trennzeichen vor der Dateiliste
+
     File file = root.openNextFile();
     while(file){
         if (first_files)
@@ -107,8 +117,20 @@ void EspFileManager::listDir(const char * dirname, uint8_t levels)
             // DEBUG(file.name());
             // DEBUG("  SIZE: ");
             // DEBUGL(file.size());
+
+            // Format: 0,<name>,<size>,<timestamp>
             str_data += "0,";
             str_data += file.name();
+            str_data += ",";
+            str_data += String(file.size());
+            str_data += ",";
+
+            // read last file mofification date/time and format it
+            time_t t = file.getLastWrite();
+            struct tm * tmstruct = localtime(&t);
+            char buf[32];
+            strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", tmstruct);
+            str_data += buf;
         }
         file = root.openNextFile();
     }
@@ -125,13 +147,21 @@ void EspFileManager::setServer(AsyncWebServer *server)
     }
     _server = server;
 
-    _server->on("/file", HTTP_GET, [&](AsyncWebServerRequest *request){ 
-            AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html_page, html_page_len);
-            response->addHeader("Content-Encoding", "gzip");
-            request->send(response);
-            // request->send(200, "text/html", html_page); 
-            // request->send(200, "text/plain", "Test route working");
-        });
+
+    _server->on("/file", AsyncWebRequestMethod::HTTP_GET, [&](AsyncWebServerRequest *request){ 
+       AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html_page, html_page_len);
+       response->addHeader("Content-Encoding", "gzip");
+       request->send(response);
+       // request->send(200, "text/html", html_page); 
+       // request->send(200, "text/plain", "Test route working");
+
+       // load HTML from LittleFS for development and debugging
+       //if (!LittleFS.exists("/file.html")) {
+       //  request->send(404, "text/plain", "File not found");
+       //  return;
+       //}
+       //request->send(LittleFS, "/file.html", "text/html");
+     });
 
     server->on("/get-folder-contents", HTTP_GET, [&](AsyncWebServerRequest *request){
         DEBUGL2("path:", request->arg("path").c_str());
@@ -215,4 +245,47 @@ void EspFileManager::setServer(AsyncWebServer *server)
             request->send(404, "application/json", "{\"status\":\"error\",\"message\":\"File not found\"}");
         } 
     });
+
+    _server->on("/create-folder", HTTP_GET, [&](AsyncWebServerRequest *request) {
+        if (!request->hasParam("path")) {
+            request->send(400, "text/plain", "Missing path");
+            return;
+        }
+
+        String path = request->getParam("path")->value();
+
+        // Sicherheitscheck: Pfad muss mit "/" beginnen und darf kein ".." enthalten
+        if (!path.startsWith("/") || path.indexOf("..") >= 0) {
+            request->send(400, "text/plain", "Invalid path");
+            return;
+        }
+
+        if (_storage->exists(path)) {
+            request->send(409, "text/plain", "Already exists");
+            return;
+        }
+
+        if (_storage->mkdir(path)) {
+            request->send(200, "text/plain", "OK");
+        } else {
+            request->send(500, "text/plain", "mkdir failed");
+        }
+    });
+}
+
+void EspFileManager::printStorageInfo()
+{
+    // physical card size
+    uint64_t cardSize  = _storage->cardSize();
+    // size managed by file system
+    uint64_t totalSize = _storage->totalBytes();
+    // occupied memory size
+    uint64_t usedSize  = _storage->usedBytes();
+    // available memory size (computed by difference)
+    uint64_t freeSize  = totalSize - usedSize;
+
+    DEBUGX("SD Card Size : %llu MB\n", cardSize  / (1024ULL * 1024ULL));
+    DEBUGX("Total space  : %llu MB\n", totalSize / (1024ULL * 1024ULL));
+    DEBUGX("Used space   : %llu MB\n", usedSize  / (1024ULL * 1024ULL));
+    DEBUGX("Free space   : %llu MB\n", freeSize  / (1024ULL * 1024ULL));
 }
