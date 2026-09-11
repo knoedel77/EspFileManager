@@ -9,6 +9,9 @@
 #include <Arduino.h>
 #include <SD.h>
 
+// load HTML-page from LittleFS for development and debugging
+#include <LittleFS.h>
+
 #ifdef ESP32
 #include <AsyncTCP.h>
 #elif defined(ESP8266)
@@ -25,21 +28,24 @@
 class EspFileManager
 {
 private:
-    uint8_t sd_cs, sd_sck, sd_miso, sd_mosi;
-    bool memory_ready = false;
+//    uint8_t sd_cs, sd_sck, sd_miso, sd_mosi;
+//    bool memory_ready = false;
     String str_data = "";
     fs::SDFS *_storage;
     AsyncWebServer *_server;
+
 public:
     EspFileManager(/* args */);
     ~EspFileManager();
 
     // void begin(AsyncWebServer *server, FS *fs);
 
-    bool initSDCard(SDFS *storage, uint8_t _cs);
+//    bool initSDCard(SDFS *storage, uint8_t _cs);
     void setFileSource(SDFS *storage);
     void listDir(const char * dirname, uint8_t levels);
-
+    
     void setServer(AsyncWebServer *server);
+
+    void printStorageInfo();
 };
 
