@@ -9,9 +9,6 @@
 #include <Arduino.h>
 #include <SD.h>
 
-// load HTML-page from LittleFS for development and debugging
-#include <LittleFS.h>
-
 #ifdef ESP32
 #include <AsyncTCP.h>
 #elif defined(ESP8266)

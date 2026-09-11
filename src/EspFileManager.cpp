@@ -4,7 +4,10 @@
 #include "FS.h"
 #include <SD.h>
 #include "SPI.h"
+
+// load HTML-page from LittleFS for development and debugging
 //#include <LittleFS.h>
+
 
 
 EspFileManager::EspFileManager(/* args */) {}
