@@ -5,12 +5,20 @@
 #include <SD.h>
 #include "SPI.h"
 
+//#define KNOEDEL_USES_THIS_FOR_DEBUGGING
+
+#ifdef KNOEDEL_USES_THIS_FOR_DEBUGGING
 // load HTML-page from LittleFS for development and debugging
-//#include <LittleFS.h>
+#include <LittleFS.h>
+#endif
 
 
 
-EspFileManager::EspFileManager(/* args */) {}
+EspFileManager::EspFileManager(/* args */) 
+{
+    _storage = nullptr;
+    _server = nullptr;
+}
 
 EspFileManager::~EspFileManager() {}
 
@@ -74,6 +82,11 @@ void EspFileManager::setFileSource(fs::SDFS *storage)
 void EspFileManager::listDir(const char * dirname, uint8_t levels)
 {
     DEBUGX("Listing directory: %s\n", dirname);
+
+    if (_storage == nullptr) {
+        DEBUGLF("Storage is nullptr");
+        return;
+    }
 
     File root = _storage->open(dirname);
     if(!root){
@@ -147,57 +160,81 @@ void EspFileManager::setServer(AsyncWebServer *server)
     }
     _server = server;
 
-
     _server->on("/file", AsyncWebRequestMethod::HTTP_GET, [&](AsyncWebServerRequest *request){ 
        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html_page, html_page_len);
+#ifdef KNOEDEL_USES_THIS_FOR_DEBUGGING       
+       // load HTML from LittleFS for development and debugging
+       if (!LittleFS.exists("/file.html")) {
+         request->send(404, "text/plain", "File not found");
+         return;
+       }
+       request->send(LittleFS, "/file.html", "text/html");
+#else
        response->addHeader("Content-Encoding", "gzip");
        request->send(response);
        // request->send(200, "text/html", html_page); 
        // request->send(200, "text/plain", "Test route working");
+#endif
 
-       // load HTML from LittleFS for development and debugging
-       //if (!LittleFS.exists("/file.html")) {
-       //  request->send(404, "text/plain", "File not found");
-       //  return;
-       //}
-       //request->send(LittleFS, "/file.html", "text/html");
      });
 
-    server->on("/get-folder-contents", HTTP_GET, [&](AsyncWebServerRequest *request){
+    _server->on("/get-folder-contents", HTTP_GET, [&](AsyncWebServerRequest *request){
         DEBUGL2("path:", request->arg("path").c_str());
         listDir(request->arg("path").c_str(), 0);
         request->send(200, "text/plain", str_data);
     });
 
-    server->on("/upload", HTTP_POST, [&](AsyncWebServerRequest *request)
-        { request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"File upload complete\"}"); }, [&](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    _server->on("/upload", HTTP_POST, [&](AsyncWebServerRequest *request) {
+        request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"File upload complete\"}"); }, [&](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+    {
         String file_path;
 
-        file_path = "/";
-        file_path += filename;
+        // Zielverzeichnis aus dem Query-Parameter "path" lesen
+        String upload_path = "/";
+        if (request->hasArg("path")) {
+            upload_path = request->arg("path");
+        }
 
-        if(!index)
+        // Sicherheitscheck: kein Path-Traversal
+        if (upload_path.indexOf("..") >= 0) {
+            DEBUGLF("Invalid upload path");
+            return;
+        }
+
+        // Pfad normalisieren: muss mit "/" beginnen und enden
+        if (!upload_path.startsWith("/")) upload_path = "/" + upload_path;
+        if (!upload_path.endsWith("/"))   upload_path += "/";
+
+        // Nur den reinen Dateinamen verwenden (falls der Browser einen Pfad mitsendet)
+        int slashIndex = filename.lastIndexOf('/');
+        if (slashIndex >= 0) {
+            filename = filename.substring(slashIndex + 1);
+        }
+
+        file_path = upload_path + filename;
+
+        if (!index)
         {
             DEBUGX("UploadStart: %s\n", file_path.c_str());
-            if(_storage->exists(file_path)) 
+            if (_storage->exists(file_path))
             {
                 _storage->remove(file_path);
             }
         }
 
         File file = _storage->open(file_path, FILE_APPEND);
-        if(file) 
+        if (file)
         {
-            if(file.write(data, len) != len)
+            if (file.write(data, len) != len)
             {
                 DEBUGLF("File write failed");
             }
             file.close();
         }
-        if(final)
+        if (final)
         {
-            DEBUGX("UploadEnd: %s, %u B\n", file_path.c_str(), index+len);
-        } 
+            DEBUGX("UploadEnd: %s, %u B\n", file_path.c_str(), index + len);
+        }
     });
 
     server->on("/delete", HTTP_GET, [&](AsyncWebServerRequest *request){
@@ -254,7 +291,7 @@ void EspFileManager::setServer(AsyncWebServer *server)
 
         String path = request->getParam("path")->value();
 
-        // Sicherheitscheck: Pfad muss mit "/" beginnen und darf kein ".." enthalten
+        // check: path must begin with "/" and must not contain ".."
         if (!path.startsWith("/") || path.indexOf("..") >= 0) {
             request->send(400, "text/plain", "Invalid path");
             return;
@@ -275,6 +312,11 @@ void EspFileManager::setServer(AsyncWebServer *server)
 
 void EspFileManager::printStorageInfo()
 {
+    if (_storage == nullptr) {
+        DEBUGLF("Storage is nullptr");
+        return;
+    }
+
     // physical card size
     uint64_t cardSize  = _storage->cardSize();
     // size managed by file system

@@ -37,8 +37,8 @@ public:
 
     // void begin(AsyncWebServer *server, FS *fs);
 
-//    bool initSDCard(SDFS *storage, uint8_t _cs);
-    void setFileSource(SDFS *storage);
+//    bool initSDCard(fs::SDFS *storage, uint8_t _cs);
+    void setFileSource(fs::SDFS *storage);
     void listDir(const char * dirname, uint8_t levels);
     
     void setServer(AsyncWebServer *server);
