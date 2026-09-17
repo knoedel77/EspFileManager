@@ -1,9 +1,6 @@
 #include "EspFileManager.h"
 // #include "page.h"
 #include "webPage.h"
-#include "FS.h"
-#include <SD.h>
-#include "SPI.h"
 
 //#define KNOEDEL_USES_THIS_FOR_DEBUGGING
 
@@ -11,7 +8,6 @@
 // load HTML-page from LittleFS for development and debugging
 #include <LittleFS.h>
 #endif
-
 
 
 EspFileManager::EspFileManager(/* args */) 
@@ -159,26 +155,34 @@ void EspFileManager::setServer(AsyncWebServer *server)
         return;
     }
     _server = server;
-
+    
     _server->on("/file", AsyncWebRequestMethod::HTTP_GET, [&](AsyncWebServerRequest *request){ 
-       AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html_page, html_page_len);
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
+        AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", html_page, html_page_len);
 #ifdef KNOEDEL_USES_THIS_FOR_DEBUGGING       
-       // load HTML from LittleFS for development and debugging
-       if (!LittleFS.exists("/file.html")) {
-         request->send(404, "text/plain", "File not found");
-         return;
-       }
-       request->send(LittleFS, "/file.html", "text/html");
+        // load HTML from LittleFS for development and debugging
+        if (!LittleFS.exists("/file.html")) {
+            request->send(404, "text/plain", "File not found");
+            return;
+        }
+        request->send(LittleFS, "/file.html", "text/html");
 #else
-       response->addHeader("Content-Encoding", "gzip");
-       request->send(response);
-       // request->send(200, "text/html", html_page); 
-       // request->send(200, "text/plain", "Test route working");
+        response->addHeader("Content-Encoding", "gzip");
+        request->send(response);
+        // request->send(200, "text/html", html_page); 
+        // request->send(200, "text/plain", "Test route working");
 #endif
 
-     });
+    });
 
     _server->on("/get-folder-contents", HTTP_GET, [&](AsyncWebServerRequest *request){
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
         DEBUGL2("path:", request->arg("path").c_str());
         listDir(request->arg("path").c_str(), 0);
         request->send(200, "text/plain", str_data);
@@ -187,6 +191,10 @@ void EspFileManager::setServer(AsyncWebServer *server)
     _server->on("/upload", HTTP_POST, [&](AsyncWebServerRequest *request) {
         request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"File upload complete\"}"); }, [&](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
     {
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
         String file_path;
 
         // Zielverzeichnis aus dem Query-Parameter "path" lesen
@@ -237,7 +245,11 @@ void EspFileManager::setServer(AsyncWebServer *server)
         }
     });
 
-    server->on("/delete", HTTP_GET, [&](AsyncWebServerRequest *request){
+    _server->on("/delete", HTTP_GET, [&](AsyncWebServerRequest *request){
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
         String path;
         if (request->hasParam("path")) 
         {
@@ -261,7 +273,11 @@ void EspFileManager::setServer(AsyncWebServer *server)
         } 
     });
 
-    server->on("/download", HTTP_GET, [&](AsyncWebServerRequest *request){
+    _server->on("/download", HTTP_GET, [&](AsyncWebServerRequest *request){
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
         String path;
         if (request->hasParam("path")) 
         {
@@ -284,6 +300,10 @@ void EspFileManager::setServer(AsyncWebServer *server)
     });
 
     _server->on("/create-folder", HTTP_GET, [&](AsyncWebServerRequest *request) {
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+
         if (!request->hasParam("path")) {
             request->send(400, "text/plain", "Missing path");
             return;
@@ -308,6 +328,11 @@ void EspFileManager::setServer(AsyncWebServer *server)
             request->send(500, "text/plain", "mkdir failed");
         }
     });
+}
+
+void EspFileManager::setCredentials(const String& username, const String& password) {
+    _httpUsername = username;
+    _httpPassword = password;
 }
 
 void EspFileManager::printStorageInfo()

@@ -31,6 +31,10 @@ private:
     fs::SDFS *_storage;
     AsyncWebServer *_server;
 
+    // credentials for optional authentication
+    String _httpUsername = "";
+    String _httpPassword = "";
+
 public:
     EspFileManager(/* args */);
     ~EspFileManager();
@@ -42,6 +46,7 @@ public:
     void listDir(const char * dirname, uint8_t levels);
     
     void setServer(AsyncWebServer *server);
+    void setCredentials(const String& username, const String& password);
 
     void printStorageInfo();
 };
