@@ -17,22 +17,81 @@
 
         .header {
             background-color: #ffffff;
-            padding: 10px;
+            padding: 10px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: relative;
         }
 
         h1 {
             margin: 0;
             font-size: 24px;
             color: #007acc;
+            flex: 0 0 auto;
+        }
+
+        .fs-label {
+            font-size: 14px;
+            font-weight: normal;
+            color: #888;
+            margin-left: 8px;
+            padding: 2px 8px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            vertical-align: middle;
+        }
+
+        /* Zentrierter Umschalter in der Mitte des Headers */
+        .fs-switcher {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+        }
+
+        .fs-switcher button {
+            padding: 8px 18px;
+            background-color: #e0e0e0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            color: #555;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .fs-switcher button:hover:not(:disabled) {
+            background-color: #d0d0d0;
+        }
+
+        /* Aktiver Button wird hervorgehoben */
+        .fs-switcher button.active {
+            background-color: #007acc;
+            border-color: #007acc;
+            color: #ffffff;
+        }
+
+        /* Deaktivierter Button (Dateisystem nicht verfügbar) */
+        .fs-switcher button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .fs-label.sd { 
+            background-color: #e3f0fa; color: #007acc;
+        }
+
+        .fs-label.littlefs { 
+            background-color: #e3f5e3; color: #2e7d32; 
         }
 
         .menu-bar {
             display: flex;
             gap: 10px;
+            flex: 0 0 auto;
         }
 
         .menu-bar button {
@@ -220,7 +279,11 @@
 
 <body>
     <div class="header">
-        <h1>Esp File Manager</h1>
+        <h1>Esp File Manager <span id="fs-label" class="fs-label">SD-Card</span></h1>
+        <div class="fs-switcher">
+            <button id="btn-sd">SD-Card</button>
+            <button id="btn-littlefs">LittleFS</button>
+        </div>
         <div class="menu-bar">
             <button id="new-folder-button">New Folder</button>
             <button id="upload-button">Upload Files</button>
@@ -318,25 +381,43 @@
         // Erstellen-Button
         newFolderCreate.addEventListener('click', createNewFolder);
 
-        // formatSize
         function formatSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
-            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' kB';
             if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
             return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
         }
 
-        // displayStorageInfo
+        let currentFs = 'sd';   // 'sd' oder 'littlefs'
+
+        function updateFsUI() {
+            const btnSd = document.getElementById('btn-sd');
+            const btnLfs = document.getElementById('btn-littlefs');
+            const fsLabel = document.getElementById('fs-label');
+
+            fsLabel.className = 'fs-label ' + currentFs;
+
+            // Aktiven Button markieren
+            btnSd.classList.toggle('active', currentFs === 'sd');
+            btnLfs.classList.toggle('active', currentFs === 'littlefs');
+
+            // Titel-Label aktualisieren
+            fsLabel.textContent = currentFs === 'sd' ? 'SD-Card' : 'LittleFS';
+        }
+
         function displayStorageInfo(storage) {
-            const usedPercent = storage.total > 0
-                ? (storage.used / storage.total) * 100
-                : 0;
+            let usedPercent = 0;
+            if (storage.total > 0) {
+                usedPercent = (storage.used / storage.total) * 100;
+                if (usedPercent > 100) usedPercent = 100;
+                if (usedPercent < 0) usedPercent = 0;
+            }
 
             storageInfoElement.innerHTML = `
             <div>
                 <strong>Speicher:</strong>
-                ${storage.used} MB belegt / ${storage.total} MB gesamt
-                (${storage.free} MB frei)
+                ${formatSize(storage.used)} belegt / ${formatSize(storage.total)} gesamt
+                (${formatSize(storage.free)} frei)
             </div>
             <div class="storage-bar">
                 <div class="storage-bar-fill" style="width: ${usedPercent.toFixed(1)}%"></div>
@@ -394,7 +475,17 @@
         }
 
         function parseData(data) {
+            let available = { sd: false, littlefs: false };
             let storage = null;
+
+            // Verfügbarkeitsinfo parsen
+            if (data.startsWith('A,')) {
+                const sepIndex = data.indexOf(':');
+                const availPart = data.substring(2, sepIndex); // "1,0"
+                const [sdAvail, lfsAvail] = availPart.split(',');
+                available = { sd: sdAvail === '1', littlefs: lfsAvail === '1' };
+                data = data.substring(sepIndex + 1);
+            }
 
             // Speicherinfo am Anfang? Format: "S,<total>,<used>:..."
             if (data.startsWith('S,')) {
@@ -405,7 +496,7 @@
                     storage = {
                         total: parseInt(total, 10),
                         used: parseInt(used, 10),
-                        free: parseInt(total, 10) - parseInt(used, 10)
+                        free: parseInt(total, 10) - parseInt(used, 10)                        
                     };
                     data = data.substring(sepIndex + 1);
                 }
@@ -428,8 +519,44 @@
                 })
                 .filter(item => item.name !== ''); // Einträge ohne Namen rausfiltern
 
-            return { items, storage };
+            return { items, storage, available  };
         }
+
+        function updateStorageButtons(available) {
+            const btnSd = document.getElementById('btn-sd');
+            const btnLfs = document.getElementById('btn-littlefs');
+
+            btnSd.disabled = !available.sd;
+            btnLfs.disabled = !available.littlefs;
+
+            // Falls das aktuell gewählte FS nicht verfügbar ist, auf das andere wechseln
+            if (currentFs === 'sd' && !available.sd && available.littlefs) {
+                currentFs = 'littlefs';
+                updateFsUI();
+            } else if (currentFs === 'littlefs' && !available.littlefs && available.sd) {
+                currentFs = 'sd';
+                updateFsUI();
+            }
+
+            updateFsUI();
+        }
+
+        function switchStorage(fsType) {
+            if (fsType === currentFs) return;   // schon aktiv, nichts tun
+
+            fetch(`/switch-storage?fs=${fsType}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Switch failed');
+                    currentFs = fsType;
+                    currentPath = ['/'];
+                    updateFsUI();
+                    fetchFolderContents(currentPath);
+                })
+                .catch(error => console.error('Error switching storage:', error));
+        }
+
+        document.getElementById('btn-sd').addEventListener('click', () => switchStorage('sd'));
+        document.getElementById('btn-littlefs').addEventListener('click', () => switchStorage('littlefs'));
 
         function createItemElement(item) {
             const itemElement = document.createElement('div');
@@ -642,8 +769,11 @@
             uploadModal.style.display = 'block';
             xhr.send(formData);
         }
+
         backButton.addEventListener('click', goBack);
+        updateFsUI();
         fetchFolderContents(currentPath);
+
     </script>
 </body>
 

@@ -4,15 +4,12 @@
 
 //#define KNOEDEL_USES_THIS_FOR_DEBUGGING
 
-#ifdef KNOEDEL_USES_THIS_FOR_DEBUGGING
-// load HTML-page from LittleFS for development and debugging
-#include <LittleFS.h>
-#endif
-
 
 EspFileManager::EspFileManager(/* args */) 
 {
-    _storage = nullptr;
+    _SDstorage = nullptr;
+    _LittleFSstorage = nullptr;
+    _currentStorage = nullptr;
     _server = nullptr;
 }
 
@@ -70,21 +67,30 @@ bool EspFileManager::initSDCard(fs::SDFS *storage, uint8_t _cs)
 }
 */
 
-void EspFileManager::setFileSource(fs::SDFS *storage)
+void EspFileManager::setSDFileSource(fs::SDFS *SDstorage)
 {   
-    _storage = storage;
+    _SDstorage = SDstorage;
+    if(_currentStorage == nullptr)
+       _currentStorage = SDstorage;
+}
+
+void EspFileManager::setLittleFSFileSource(fs::LittleFSFS *LittleFSstorage)
+{   
+    _LittleFSstorage = LittleFSstorage;
+    if(_currentStorage == nullptr)
+       _currentStorage = LittleFSstorage;
 }
 
 void EspFileManager::listDir(const char * dirname, uint8_t levels)
 {
     DEBUGX("Listing directory: %s\n", dirname);
 
-    if (_storage == nullptr) {
+    if (_currentStorage == nullptr) {
         DEBUGLF("Storage is nullptr");
         return;
     }
 
-    File root = _storage->open(dirname);
+    File root = _currentStorage->open(dirname);
     if(!root){
         DEBUGLF("Failed to open directory");
         return;
@@ -97,13 +103,24 @@ void EspFileManager::listDir(const char * dirname, uint8_t levels)
     bool first_files = true;
     str_data = "";
 
-    // memory info for header
-    uint64_t totalSize = _storage->totalBytes();
-    uint64_t usedSize  = _storage->usedBytes();
+    uint64_t totalSize = 0;
+    uint64_t usedSize  = 0;
+
+       // memory info for header
+    if(_currentStorage == _SDstorage){
+       totalSize = _SDstorage->totalBytes();
+       usedSize  = _SDstorage->usedBytes();
+    } else {
+       totalSize = _LittleFSstorage->totalBytes();
+       usedSize  = _LittleFSstorage->usedBytes();
+    }
+
     str_data = "S,";
-    str_data += String((unsigned long)(totalSize / (1024ULL * 1024ULL)));
+//    str_data += String((unsigned long)(totalSize / (1024ULL * 1024ULL)));
+    str_data += String((unsigned long long)totalSize);
     str_data += ",";
-    str_data += String((unsigned long)(usedSize / (1024ULL * 1024ULL)));
+//    str_data += String((unsigned long)(usedSize / (1024ULL * 1024ULL)));
+    str_data += String((unsigned long long)usedSize);
     str_data += ":";   // Trennzeichen vor der Dateiliste
 
     File file = root.openNextFile();
@@ -224,13 +241,13 @@ void EspFileManager::setServer(AsyncWebServer *server)
         if (!index)
         {
             DEBUGX("UploadStart: %s\n", file_path.c_str());
-            if (_storage->exists(file_path))
+            if (_currentStorage->exists(file_path))
             {
-                _storage->remove(file_path);
+                _currentStorage->remove(file_path);
             }
         }
 
-        File file = _storage->open(file_path, FILE_APPEND);
+        File file = _currentStorage->open(file_path, FILE_APPEND);
         if (file)
         {
             if (file.write(data, len) != len)
@@ -262,9 +279,9 @@ void EspFileManager::setServer(AsyncWebServer *server)
         }
 
         DEBUGL2("Deleting File: ", path);
-        if (_storage->exists(path)) 
+        if (_currentStorage->exists(path)) 
         {
-            _storage->remove(path);
+            _currentStorage->remove(path);
             request->send(200, "application/json", "{\"status\":\"success\",\"message\":\"File deleted successfully\"}");
         } 
         else 
@@ -289,9 +306,9 @@ void EspFileManager::setServer(AsyncWebServer *server)
             return;
         }
         DEBUGL2("Downloading File: ", path);
-        if (_storage->exists(path)) 
+        if (_currentStorage->exists(path)) 
         {
-            request->send(*_storage, path, String(), true);
+            request->send(*_currentStorage, path, String(), true);
         } 
         else 
         {
@@ -317,16 +334,38 @@ void EspFileManager::setServer(AsyncWebServer *server)
             return;
         }
 
-        if (_storage->exists(path)) {
+        if (_currentStorage->exists(path)) {
             request->send(409, "text/plain", "Already exists");
             return;
         }
 
-        if (_storage->mkdir(path)) {
+        if (_currentStorage->mkdir(path)) {
             request->send(200, "text/plain", "OK");
         } else {
             request->send(500, "text/plain", "mkdir failed");
         }
+    });
+
+    server->on("/switch-storage", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if ((_httpUsername.length() > 0) && !request->authenticate(_httpUsername.c_str(), _httpPassword.c_str())){
+            return request->requestAuthentication();
+        }
+        
+        if (!request->hasArg("fs")) {
+            request->send(400, "text/plain", "Missing fs parameter");
+            return;
+        }
+
+        String fs = request->arg("fs");
+        if (fs == "sd" && _SDstorage != nullptr) {
+            _currentStorage = _SDstorage;
+            request->send(200, "text/plain", "OK");
+        } else if (fs == "littlefs" && _LittleFSstorage != nullptr) {
+            _currentStorage = _LittleFSstorage;
+            request->send(200, "text/plain", "OK");
+        } else {
+            request->send(400, "text/plain", "FS not available");
+        } 
     });
 }
 
@@ -335,23 +374,42 @@ void EspFileManager::setCredentials(const String& username, const String& passwo
     _httpPassword = password;
 }
 
-void EspFileManager::printStorageInfo()
+void EspFileManager::printSDStorageInfo()
 {
-    if (_storage == nullptr) {
-        DEBUGLF("Storage is nullptr");
+    if (_SDstorage == nullptr) {
+        DEBUGLF("SD Storage is nullptr");
         return;
     }
 
     // physical card size
-    uint64_t cardSize  = _storage->cardSize();
+    uint64_t cardSize  = _SDstorage->cardSize();
     // size managed by file system
-    uint64_t totalSize = _storage->totalBytes();
+    uint64_t totalSize = _SDstorage->totalBytes();
     // occupied memory size
-    uint64_t usedSize  = _storage->usedBytes();
+    uint64_t usedSize  = _SDstorage->usedBytes();
     // available memory size (computed by difference)
     uint64_t freeSize  = totalSize - usedSize;
 
     DEBUGX("SD Card Size : %llu MB\n", cardSize  / (1024ULL * 1024ULL));
+    DEBUGX("Total space  : %llu MB\n", totalSize / (1024ULL * 1024ULL));
+    DEBUGX("Used space   : %llu MB\n", usedSize  / (1024ULL * 1024ULL));
+    DEBUGX("Free space   : %llu MB\n", freeSize  / (1024ULL * 1024ULL));
+}
+
+void EspFileManager::printLittleFSStorageInfo()
+{
+    if (_LittleFSstorage == nullptr) {
+        DEBUGLF("SD Storage is nullptr");
+        return;
+    }
+
+    // size managed by file system
+    uint64_t totalSize = _LittleFSstorage->totalBytes();
+    // occupied memory size
+    uint64_t usedSize  = _LittleFSstorage->usedBytes();
+    // available memory size (computed by difference)
+    uint64_t freeSize  = totalSize - usedSize;
+
     DEBUGX("Total space  : %llu MB\n", totalSize / (1024ULL * 1024ULL));
     DEBUGX("Used space   : %llu MB\n", usedSize  / (1024ULL * 1024ULL));
     DEBUGX("Free space   : %llu MB\n", freeSize  / (1024ULL * 1024ULL));
