@@ -21,46 +21,71 @@
 ## Usage
 
     ```cpp
-    #include <AsyncTCP.h>
-    #include <ESPAsyncWebServer.h>
-    #include <SPI.h>
-    #include <SD.h>
-    #include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <SPI.h>
+#include <SD.h>
+#include <WiFi.h>
 
 
-    #include <EspFileManager.h>
+#include <EspFileManager.h>
 
-    #define MICROSD_SPI_SS_PIN 5
-    #define ST_SSID "XXXXXXXXXXX"
-    #define ST_PASS "XXXXXXXXXXX"
+#define MICROSD_SPI_SS_PIN 5
+#define ST_SSID "XXXXXXXXXXX"
+#define ST_PASS "XXXXXXXXXXX"
 
-    AsyncWebServer server(80);
-    EspFileManager FileManager;
+AsyncWebServer server(80);
+EspFileManager FileManager;
 
-    void setup() 
-    {
-        Serial.begin(115200);
+void setup() 
+{
+  Serial.begin(115200);
 
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(ST_SSID, ST_PASS);
-        while (WiFi.status() != WL_CONNECTED);
-        {
-            Serial.print(".");
-            delay(50);
-        }
-        Serial.print("Connected to wifi... \nIP: ");
-        Serial.println(WiFi.localIP());
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ST_SSID, ST_PASS);
+  while (WiFi.status() != WL_CONNECTED);
+  {
+	Serial.print(".");
+	delay(50);
+  }
 
-        FileManager.initSDCard(&SD, MICROSD_SPI_SS_PIN);
-        FileManager.setServer(&server);
+  Serial.print("Connected to wifi... \nIP: ");
+  Serial.println(WiFi.localIP());
 
-        server.begin();
-    }
+  if (!SD.begin(MICROSD_SPI_SS_PIN)) {
+    Serial.println("SD card init failed");
+  } else {
+    Serial.println("SD card initialized");
+    FileManager.setSDFileSource(&SD);
+  }
 
-    void loop() 
-    {
-    
-    }
+  if(!LittleFS.begin(true)) {
+    Serial.println("LittleFS init failed");
+  } else {
+    Serial.println("LittleFS initialized");
+    FileManager.setLittleFSFileSource(&LittleFS);
+  }
+
+  FileManager.setServer(&server);
+
+  server.begin();
+}
+
+void loop() 
+{
+  
+}
+
+## Screenshots
+
+### SD-Card
+
+<img alt="SD-Card" src="./images/screenshot_sd-card.png">
+
+### LittleFS
+
+<img alt="LittleFS" src="./images/screenshot_littlefs.png">
+
 
 ## Support
 
