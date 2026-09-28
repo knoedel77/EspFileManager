@@ -28,7 +28,20 @@ void setup()
   Serial.print("Connected to wifi... \nIP: ");
   Serial.println(WiFi.localIP());
 
-  FileManager.initSDCard(&SD, MICROSD_SPI_SS_PIN);
+  if (!SD.begin(MICROSD_SPI_SS_PIN)) {
+    Serial.println("SD card init failed");
+  } else {
+    Serial.println("SD card initialized");
+    FileManager.setSDFileSource(&SD);
+  }
+
+  if(!LittleFS.begin(true)) {
+    Serial.println("LittleFS init failed");
+  } else {
+    Serial.println("LittleFS initialized");
+    FileManager.setLittleFSFileSource(&LittleFS);
+  }
+
   FileManager.setServer(&server);
 
   server.begin();
